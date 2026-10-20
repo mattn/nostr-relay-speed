@@ -154,7 +154,9 @@
         color: var(--text-sub);
       }
       .table-wrap {
-        overflow-x: auto;
+        overflow: auto;
+        max-height: 70vh;
+        -webkit-overflow-scrolling: touch;
       }
       table {
         width: 100%;
@@ -169,6 +171,10 @@
         white-space: nowrap;
       }
       th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--card-bg);
         font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.06em;
@@ -187,8 +193,7 @@
         font-variant-numeric: tabular-nums;
       }
       td.relay {
-        white-space: normal;
-        word-break: break-all;
+        white-space: nowrap;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.78rem;
       }
@@ -271,6 +276,10 @@
             >タイムアウト (ms)
             <input type="number" id="timeout" value="8000" min="1000" max="30000" /></label
           >
+          <label
+            >NIP-66 から測る上限
+            <input type="number" id="maxcand" value="60" min="0" max="600" /></label
+          >
         </div>
 
         <div class="actions">
@@ -344,6 +353,17 @@
             です。CORS で取得できないリレーでは空欄になります。
           </li>
         </ul>
+        <h3>測る相手の選び方</h3>
+        <ul>
+          <li>
+            NIP-66 の監視レポートから候補を集めると 500 件以上になるので、既定では
+            <b>報告している監視ノードが多い順</b>に上位 60 件だけ測ります。多くの監視ノードが見ているリレーほど広く使われている、という近似です。上限は変更できます。
+          </li>
+          <li>
+            手入力、<code>?relay=</code>、自前リレー、自分の kind 10002
+            から来たものは上限とは無関係に必ず測ります。
+          </li>
+        </ul>
         <h3>この値はあなたの視点のものでしかない</h3>
         <ul>
           <li>
@@ -370,10 +390,15 @@
         "wss://ruby-nostr-relay.compile-error.net",
         "wss://zig-nostr-relay.compile-error.net",
       ];
+      // kind 30166 が実際に取れるリレー。relay.nostr.band と purplepag.es は
+      // 監視レポートを保持していないため外してある。
       const DISCOVERY_RELAYS = [
+        "wss://relay.damus.io",
+        "wss://nos.lol",
+        "wss://nostr.mom",
+        "wss://relay.nostr.net",
         "wss://yabu.me",
         "wss://nostr.compile-error.net",
-        "wss://relay.nostr.band",
       ];
       const KIND_RELAY_DISCOVERY = 30166;
       const KIND_RELAY_LIST = 10002;
@@ -532,11 +557,13 @@
         });
       }
 
+      // 候補 URL -> それを報告している監視ノードの集合。
+      // 多くの監視ノードが見ているリレーほど広く使われていると見なして優先する。
       async function discoverFromNip66() {
-        const urls = new Set();
+        const byUrl = new Map();
         const lists = await Promise.all(
           DISCOVERY_RELAYS.map((r) =>
-            collect(r, { kinds: [KIND_RELAY_DISCOVERY], limit: 500 }, 9000)
+            collect(r, { kinds: [KIND_RELAY_DISCOVERY], limit: 2000 }, 12000)
           )
         );
         for (const evs of lists)
@@ -544,9 +571,13 @@
             for (const t of ev.tags || [])
               if (t[0] === "d") {
                 const n = normalize(t[1]);
-                if (n) urls.add(n);
+                if (!n) continue;
+                if (!byUrl.has(n)) byUrl.set(n, new Set());
+                byUrl.get(n).add(ev.pubkey);
               }
-        return urls;
+        return Array.from(byUrl.entries())
+          .sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]))
+          .map(([url, monitors]) => ({ url, monitors: monitors.size }));
       }
 
       async function discoverMyRelays() {
@@ -686,7 +717,13 @@
         if ($("src-nip66").checked) {
           setStatus("NIP-66 からリレー候補を収集中…");
           try {
-            for (const u of await discoverFromNip66()) urls.add(u);
+            const cap = Math.max(0, Math.min(600, +$("maxcand").value || 0));
+            const ranked = await discoverFromNip66();
+            setStatus(
+              "NIP-66 から " + ranked.length + " 件の候補。上位 " +
+              Math.min(cap, ranked.length) + " 件を測定します…"
+            );
+            for (const c of ranked.slice(0, cap)) urls.add(c.url);
           } catch (e) {}
         }
 
