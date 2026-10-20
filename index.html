@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nostr Relay Speed</title>
+    <meta
+      name="description"
+      content="あなたのブラウザからリレーへの接続時間とクエリ応答時間を測ります。すべて同じ視点から測るので、リレー同士を比較できます。"
+    />
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --card-bg: #ffffff;
+        --card-border: rgba(0, 0, 0, 0.08);
+        --text: #1c1e21;
+        --text-sub: #6b7280;
+        --accent: #8b5cf6;
+        --ok: #16a34a;
+        --warn: #d97706;
+        --err: #dc2626;
+        --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14151a;
+          --card-bg: #1e2028;
+          --card-border: rgba(255, 255, 255, 0.08);
+          --text: #e5e7eb;
+          --text-sub: #9ca3af;
+          --ok: #4ade80;
+          --warn: #fbbf24;
+          --err: #f87171;
+          --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 32px 16px 64px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
+          "Noto Sans JP", sans-serif;
+        line-height: 1.6;
+      }
+      main {
+        max-width: 1000px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.5rem;
+      }
+      .lead {
+        margin: 0 0 24px;
+        color: var(--text-sub);
+        font-size: 0.9rem;
+      }
+      .card {
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 14px;
+        box-shadow: var(--shadow);
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+      h2 {
+        margin: 0 0 12px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--text-sub);
+      }
+      label {
+        display: block;
+        font-size: 0.86rem;
+        margin-bottom: 8px;
+      }
+      label input[type="checkbox"] {
+        margin-right: 8px;
+      }
+      .hint {
+        display: block;
+        margin: 2px 0 0 24px;
+        font-size: 0.76rem;
+        color: var(--text-sub);
+      }
+      textarea {
+        width: 100%;
+        min-height: 72px;
+        padding: 10px 12px;
+        border: 1px solid var(--card-border);
+        border-radius: 10px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8rem;
+        resize: vertical;
+      }
+      .params {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        margin-top: 12px;
+      }
+      .params label {
+        margin: 0;
+        font-size: 0.8rem;
+        color: var(--text-sub);
+      }
+      .params input {
+        display: block;
+        width: 88px;
+        margin-top: 4px;
+        padding: 6px 8px;
+        border: 1px solid var(--card-border);
+        border-radius: 8px;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 0.9rem;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        margin-top: 16px;
+      }
+      button {
+        padding: 9px 18px;
+        border: 1px solid var(--card-border);
+        border-radius: 999px;
+        background: var(--card-bg);
+        color: var(--text);
+        font-size: 0.86rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      #status {
+        font-size: 0.82rem;
+        color: var(--text-sub);
+      }
+      .table-wrap {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.84rem;
+      }
+      th,
+      td {
+        padding: 8px 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--card-border);
+        white-space: nowrap;
+      }
+      th {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-sub);
+        cursor: pointer;
+        user-select: none;
+      }
+      th.sorted::after {
+        content: " ▾";
+      }
+      th.sorted.asc::after {
+        content: " ▴";
+      }
+      td.num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      td.relay {
+        white-space: normal;
+        word-break: break-all;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.78rem;
+      }
+      .s-ok {
+        color: var(--ok);
+      }
+      .s-auth,
+      .s-closed {
+        color: var(--warn);
+      }
+      .s-error,
+      .s-timeout {
+        color: var(--err);
+      }
+      .own {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .note {
+        font-size: 0.8rem;
+        color: var(--text-sub);
+      }
+      .note h3 {
+        font-size: 0.86rem;
+        color: var(--text);
+        margin: 16px 0 6px;
+      }
+      .note ul {
+        margin: 0;
+        padding-left: 1.3em;
+      }
+      .note code {
+        font-size: 0.76rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>⏱️ Nostr Relay Speed</h1>
+      <p class="lead">
+        あなたのブラウザからリレーへの <b>接続時間</b> と <b>クエリ応答時間</b>
+        を測ります。すべて同じ回線・同じ場所から測るので、リレー同士を比較できます。
+      </p>
+
+      <section class="card">
+        <h2>測定するリレー</h2>
+        <label
+          ><input type="checkbox" id="src-nip66" checked />NIP-66
+          のリレー発見レポート (kind 30166)
+          <span class="hint"
+            >監視ノードが報告しているリレー URL を候補として集めます。報告されている
+            rtt の値は使いません (監視ノードの視点の値なので、ここでの測定とは比較できません)。</span
+          ></label
+        >
+        <label
+          ><input type="checkbox" id="src-own" checked />compile-error.net の自前リレー
+          <span class="hint"
+            >公開監視ノードがカバーしていないため、別途ここから足します。</span
+          ></label
+        >
+        <label
+          ><input type="checkbox" id="src-mine" />自分のリレーリスト (kind 10002)
+          <span class="hint"
+            >NIP-07 拡張で公開鍵を取得して、自分が使っているリレーを測ります。</span
+          ></label
+        >
+        <label for="manual" style="margin-top: 12px">手入力 (1行に1つ)</label>
+        <textarea id="manual" placeholder="wss://relay.example.com"></textarea>
+
+        <div class="params">
+          <label
+            >測定回数
+            <input type="number" id="rounds" value="3" min="1" max="10" /></label
+          >
+          <label
+            >同時接続数
+            <input type="number" id="concurrency" value="6" min="1" max="20" /></label
+          >
+          <label
+            >タイムアウト (ms)
+            <input type="number" id="timeout" value="8000" min="1000" max="30000" /></label
+          >
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="run">測定開始</button>
+          <button id="stop" disabled>中止</button>
+          <button id="copy" disabled>結果をコピー</button>
+          <span id="status"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>結果</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-key="url">リレー</th>
+                <th data-key="open" class="sorted asc">接続 (ms)</th>
+                <th data-key="read">クエリ (ms)</th>
+                <th data-key="openMin">接続 最小</th>
+                <th data-key="readMin">クエリ 最小</th>
+                <th data-key="status">状態</th>
+                <th data-key="software">実装</th>
+              </tr>
+            </thead>
+            <tbody id="rows">
+              <tr>
+                <td colspan="7" class="note">「測定開始」を押してください。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card note">
+        <h2>読み方</h2>
+        <h3>接続 (rtt-open) と クエリ (rtt-read) は別のものを表している</h3>
+        <ul>
+          <li>
+            <b>接続</b> は WebSocket が開くまで。DNS、TCP、TLS
+            ハンドシェイクを含むので、ほぼ<b>経路と距離</b>の話になります。
+          </li>
+          <li>
+            <b>クエリ</b> は <code>REQ</code> を送ってから最初の
+            <code>EVENT</code> か <code>EOSE</code>
+            が返るまで。同じ場所から測るかぎり経路条件は共通なので、差は<b>リレー自身のクエリ性能</b>として読めます。
+          </li>
+          <li>
+            この2つは相関しません。接続が速くてクエリが遅いリレー、その逆も普通にあります。
+          </li>
+        </ul>
+        <h3>1回目は遅い</h3>
+        <ul>
+          <li>
+            DNS 解決と TLS ハンドシェイクが乗るため、初回は実力より遅く出ます。既定では3回測って<b>中央値</b>を採り、参考として<b>最小値</b>も併記しています。
+          </li>
+        </ul>
+        <h3>測れないもの</h3>
+        <ul>
+          <li>
+            <code>ws://</code> (平文) は https ページからは mixed content
+            として遮断されるため対象外です。<code>.onion</code> も同様に到達できません。
+          </li>
+          <li>
+            NIP-42 の認証必須リレーや有料リレーは <code>REQ</code>
+            が拒否されるので、<b>auth</b> / <b>closed</b>
+            として「遅い」とは区別して表示します。
+          </li>
+          <li>
+            「実装」欄は NIP-11 の <code>software</code> / <code>version</code>
+            です。CORS で取得できないリレーでは空欄になります。
+          </li>
+        </ul>
+        <h3>この値はあなたの視点のものでしかない</h3>
+        <ul>
+          <li>
+            同じリレーでも、測る場所が変わればまったく違う数字になります。ここでの結果は「あなたの回線から見たリレーの速さ」であって、リレーの絶対的な性能ではありません。
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <script>
+      const OWN_RELAYS = [
+        "wss://nostr.compile-error.net",
+        "wss://cagliostr.compile-error.net",
+        "wss://casanostr.compile-error.net",
+        "wss://nip29-relay.compile-error.net",
+        "wss://crystal-nostr-relay.compile-error.net",
+        "wss://lisp-nostr-relay.compile-error.net",
+        "wss://lua-nostr-relay.compile-error.net",
+        "wss://moonbit-nostr-relay.compile-error.net",
+        "wss://mruby-nostr-relay.compile-error.net",
+        "wss://nim-nostr-relay.compile-error.net",
+        "wss://ocaml-nostr-relay.compile-error.net",
+        "wss://perl-nostr-relay.compile-error.net",
+        "wss://ruby-nostr-relay.compile-error.net",
+        "wss://zig-nostr-relay.compile-error.net",
+      ];
+      const DISCOVERY_RELAYS = [
+        "wss://yabu.me",
+        "wss://nostr.compile-error.net",
+        "wss://relay.nostr.band",
+      ];
+      const KIND_RELAY_DISCOVERY = 30166;
+      const KIND_RELAY_LIST = 10002;
+
+      const $ = (id) => document.getElementById(id);
+      const setStatus = (s) => ($("status").textContent = s);
+
+      // wss:// のみ、末尾スラッシュを落として小文字化。到達できないものは捨てる。
+      function normalize(raw) {
+        if (!raw) return null;
+        let s = String(raw).trim();
+        if (!s) return null;
+        if (s.startsWith("ws://")) return null; // mixed content で開けない
+        if (!s.startsWith("wss://")) {
+          if (/^[a-z0-9.-]+\.[a-z]{2,}(\/|$)/i.test(s)) s = "wss://" + s;
+          else return null;
+        }
+        let u;
+        try {
+          u = new URL(s);
+        } catch (e) {
+          return null;
+        }
+        if (u.protocol !== "wss:") return null;
+        if (u.hostname.endsWith(".onion")) return null;
+        if (u.hostname.endsWith(".local")) return null;
+        const path = u.pathname.replace(/\/+$/, "");
+        return "wss://" + u.host.toLowerCase() + path;
+      }
+
+      // 1本のリレーに REQ を投げて EVENT/EOSE までの時間を測る。
+      function probe(url, timeoutMs) {
+        return new Promise((resolve) => {
+          const t0 = performance.now();
+          let ws;
+          let tOpen = null;
+          let tReq = null;
+          let settled = false;
+          const finish = (r) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            try {
+              ws && ws.close();
+            } catch (e) {}
+            resolve(r);
+          };
+          const timer = setTimeout(
+            () => finish({ status: tOpen === null ? "timeout" : "timeout", open: tOpen }),
+            timeoutMs
+          );
+          try {
+            ws = new WebSocket(url);
+          } catch (e) {
+            return finish({ status: "error" });
+          }
+          ws.onopen = () => {
+            tOpen = performance.now() - t0;
+            const sub = "spd" + Math.random().toString(36).slice(2, 10);
+            tReq = performance.now();
+            try {
+              ws.send(JSON.stringify(["REQ", sub, { kinds: [1], limit: 1 }]));
+            } catch (e) {
+              finish({ status: "error", open: tOpen });
+            }
+          };
+          ws.onmessage = (ev) => {
+            let m;
+            try {
+              m = JSON.parse(ev.data);
+            } catch (e) {
+              return;
+            }
+            if (m[0] === "EVENT" || m[0] === "EOSE") {
+              finish({ status: "ok", open: tOpen, read: performance.now() - tReq });
+            } else if (m[0] === "CLOSED") {
+              const reason = String(m[2] || "");
+              finish({
+                status: /auth/i.test(reason) ? "auth" : "closed",
+                open: tOpen,
+                reason,
+              });
+            }
+            // AUTH / NOTICE は読めることもあるので待ち続ける
+          };
+          ws.onerror = () => finish({ status: "error", open: tOpen });
+          ws.onclose = () =>
+            finish({ status: tOpen === null ? "error" : "closed", open: tOpen });
+        });
+      }
+
+      const median = (xs) => {
+        const a = xs.filter((x) => typeof x === "number").sort((p, q) => p - q);
+        if (!a.length) return null;
+        const h = a.length >> 1;
+        return a.length % 2 ? a[h] : (a[h - 1] + a[h]) / 2;
+      };
+      const min = (xs) => {
+        const a = xs.filter((x) => typeof x === "number");
+        return a.length ? Math.min.apply(null, a) : null;
+      };
+
+      // NIP-11. CORS で落ちることが多いので失敗は無視する。
+      async function fetchNip11(url) {
+        const https = url.replace(/^wss:\/\//, "https://");
+        try {
+          const ctl = new AbortController();
+          const t = setTimeout(() => ctl.abort(), 5000);
+          const res = await fetch(https, {
+            headers: { Accept: "application/nostr+json" },
+            signal: ctl.signal,
+          });
+          clearTimeout(t);
+          if (!res.ok) return null;
+          return await res.json();
+        } catch (e) {
+          return null;
+        }
+      }
+
+      // リレーから1つのフィルタで引けるだけ引く。
+      function collect(relayUrl, filter, timeoutMs) {
+        return new Promise((resolve) => {
+          const out = [];
+          let ws;
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            try {
+              ws && ws.close();
+            } catch (e) {}
+            resolve(out);
+          };
+          const timer = setTimeout(finish, timeoutMs);
+          try {
+            ws = new WebSocket(relayUrl);
+          } catch (e) {
+            return finish();
+          }
+          const sub = "col" + Math.random().toString(36).slice(2, 10);
+          ws.onopen = () => ws.send(JSON.stringify(["REQ", sub, filter]));
+          ws.onmessage = (ev) => {
+            let m;
+            try {
+              m = JSON.parse(ev.data);
+            } catch (e) {
+              return;
+            }
+            if (m[0] === "EVENT" && m[2]) out.push(m[2]);
+            else if (m[0] === "EOSE" || m[0] === "CLOSED") finish();
+          };
+          ws.onerror = finish;
+          ws.onclose = finish;
+        });
+      }
+
+      async function discoverFromNip66() {
+        const urls = new Set();
+        const lists = await Promise.all(
+          DISCOVERY_RELAYS.map((r) =>
+            collect(r, { kinds: [KIND_RELAY_DISCOVERY], limit: 500 }, 9000)
+          )
+        );
+        for (const evs of lists)
+          for (const ev of evs)
+            for (const t of ev.tags || [])
+              if (t[0] === "d") {
+                const n = normalize(t[1]);
+                if (n) urls.add(n);
+              }
+        return urls;
+      }
+
+      async function discoverMyRelays() {
+        if (!window.nostr) {
+          throw new Error("NIP-07 拡張が見つかりません");
+        }
+        const pubkey = await window.nostr.getPublicKey();
+        const urls = new Set();
+        const lists = await Promise.all(
+          DISCOVERY_RELAYS.map((r) =>
+            collect(
+              r,
+              { kinds: [KIND_RELAY_LIST], authors: [pubkey], limit: 1 },
+              9000
+            )
+          )
+        );
+        for (const evs of lists)
+          for (const ev of evs)
+            for (const t of ev.tags || [])
+              if (t[0] === "r") {
+                const n = normalize(t[1]);
+                if (n) urls.add(n);
+              }
+        return urls;
+      }
+
+      async function pool(items, limit, worker) {
+        let i = 0;
+        const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+          while (i < items.length) {
+            const idx = i++;
+            await worker(items[idx], idx);
+          }
+        });
+        await Promise.all(runners);
+      }
+
+      let results = [];
+      let sortKey = "open";
+      let sortAsc = true;
+      let aborted = false;
+
+      function statusLabel(s) {
+        return (
+          {
+            ok: "ok",
+            auth: "auth 必須",
+            closed: "拒否",
+            error: "エラー",
+            timeout: "タイムアウト",
+          }[s] || s
+        );
+      }
+
+      function render() {
+        const tbody = $("rows");
+        if (!results.length) {
+          tbody.innerHTML =
+            '<tr><td colspan="7" class="note">「測定開始」を押してください。</td></tr>';
+          return;
+        }
+        const rank = { ok: 0, auth: 1, closed: 2, error: 3, timeout: 4, "": 5 };
+        const sorted = results.slice().sort((a, b) => {
+          let x = a[sortKey];
+          let y = b[sortKey];
+          if (sortKey === "status") {
+            x = rank[a.status] ?? 9;
+            y = rank[b.status] ?? 9;
+          }
+          if (x === null || x === undefined) return 1;
+          if (y === null || y === undefined) return -1;
+          if (typeof x === "string") return sortAsc ? x.localeCompare(y) : y.localeCompare(x);
+          return sortAsc ? x - y : y - x;
+        });
+        tbody.innerHTML = sorted
+          .map((r) => {
+            const own = r.url.includes("compile-error.net") ? ' class="own"' : "";
+            const n = (v) => (typeof v === "number" ? Math.round(v) : "—");
+            return (
+              "<tr><td class=\"relay\"><span" +
+              own +
+              ">" +
+              r.url.replace("wss://", "") +
+              "</span></td>" +
+              '<td class="num">' + n(r.open) + "</td>" +
+              '<td class="num">' + n(r.read) + "</td>" +
+              '<td class="num">' + n(r.openMin) + "</td>" +
+              '<td class="num">' + n(r.readMin) + "</td>" +
+              '<td class="s-' + r.status + '">' + statusLabel(r.status) + "</td>" +
+              "<td>" + (r.software || "") + "</td></tr>"
+            );
+          })
+          .join("");
+      }
+
+      for (const th of document.querySelectorAll("th[data-key]")) {
+        th.addEventListener("click", () => {
+          const key = th.dataset.key;
+          if (sortKey === key) sortAsc = !sortAsc;
+          else {
+            sortKey = key;
+            sortAsc = true;
+          }
+          for (const o of document.querySelectorAll("th[data-key]"))
+            o.className = o === th ? "sorted" + (sortAsc ? " asc" : "") : "";
+          render();
+        });
+      }
+
+      async function run() {
+        aborted = false;
+        $("run").disabled = true;
+        $("stop").disabled = false;
+        $("copy").disabled = true;
+        results = [];
+        render();
+
+        const urls = new Set();
+        for (const line of $("manual").value.split(/\r?\n/)) {
+          const n = normalize(line);
+          if (n) urls.add(n);
+        }
+        for (const p of new URLSearchParams(location.search).getAll("relay")) {
+          const n = normalize(p);
+          if (n) urls.add(n);
+        }
+        if ($("src-own").checked) for (const u of OWN_RELAYS) urls.add(normalize(u));
+        if ($("src-mine").checked) {
+          setStatus("自分のリレーリストを取得中…");
+          try {
+            for (const u of await discoverMyRelays()) urls.add(u);
+          } catch (e) {
+            setStatus("リレーリストを取得できませんでした: " + e.message);
+          }
+        }
+        if ($("src-nip66").checked) {
+          setStatus("NIP-66 からリレー候補を収集中…");
+          try {
+            for (const u of await discoverFromNip66()) urls.add(u);
+          } catch (e) {}
+        }
+
+        const list = Array.from(urls).filter(Boolean).sort();
+        if (!list.length) {
+          setStatus("測定対象がありません。");
+          $("run").disabled = false;
+          $("stop").disabled = true;
+          return;
+        }
+
+        const rounds = Math.max(1, Math.min(10, +$("rounds").value || 3));
+        const limit = Math.max(1, Math.min(20, +$("concurrency").value || 6));
+        const timeoutMs = Math.max(1000, Math.min(30000, +$("timeout").value || 8000));
+
+        let done = 0;
+        await pool(list, limit, async (url) => {
+          if (aborted) return;
+          const opens = [];
+          const reads = [];
+          let status = "error";
+          for (let i = 0; i < rounds && !aborted; i++) {
+            const r = await probe(url, timeoutMs);
+            if (typeof r.open === "number") opens.push(r.open);
+            if (typeof r.read === "number") reads.push(r.read);
+            // ok が一度でも取れればそれを採用、取れなければ最後の状態
+            if (r.status === "ok" || status !== "ok") status = r.status;
+          }
+          const nip11 = await fetchNip11(url);
+          results.push({
+            url,
+            open: median(opens),
+            read: median(reads),
+            openMin: min(opens),
+            readMin: min(reads),
+            status,
+            software: nip11
+              ? [
+                  (nip11.software || "").replace(/^https?:\/\/(github\.com\/)?/, ""),
+                  nip11.version || "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")
+              : "",
+          });
+          done++;
+          setStatus(done + " / " + list.length + " 件 測定済み");
+          render();
+        });
+
+        setStatus(
+          aborted
+            ? "中止しました (" + done + " / " + list.length + " 件)"
+            : list.length + " 件の測定が完了しました"
+        );
+        $("run").disabled = false;
+        $("stop").disabled = true;
+        $("copy").disabled = results.length === 0;
+      }
+
+      $("run").addEventListener("click", run);
+      $("stop").addEventListener("click", () => {
+        aborted = true;
+        setStatus("中止しています…");
+      });
+      $("copy").addEventListener("click", async () => {
+        const lines = results
+          .slice()
+          .sort((a, b) => (a.open ?? 1e9) - (b.open ?? 1e9))
+          .map(
+            (r) =>
+              r.url.replace("wss://", "") +
+              "  接続 " +
+              (typeof r.open === "number" ? Math.round(r.open) + "ms" : "—") +
+              " / クエリ " +
+              (typeof r.read === "number" ? Math.round(r.read) + "ms" : "—") +
+              (r.status === "ok" ? "" : "  (" + statusLabel(r.status) + ")")
+          );
+        const text =
+          "Nostr リレー速度 (自分のブラウザから測定)\n" +
+          lines.join("\n") +
+          "\nhttps://clask.compile-error.net/nostr-relay-speed/";
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus("結果をコピーしました");
+        } catch (e) {
+          setStatus("コピーできませんでした");
+        }
+      });
+
+      // ?relay= が付いていればそのまま走らせる
+      if (new URLSearchParams(location.search).has("relay")) {
+        $("src-nip66").checked = false;
+        $("src-own").checked = false;
+        run();
+      }
+    </script>
+  </body>
+</html>
